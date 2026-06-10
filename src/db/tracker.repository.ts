@@ -40,6 +40,7 @@ function formatRowDate(value: string | Date | null | undefined): string | null {
 function toTrackerRow(row: TrackerRowRecord, includeOwner = false): TrackerRow {
   const base: TrackerRow = {
     id: row.id,
+    userId: row.user_id,
     date: formatRowDate(row.row_date),
     name: row.name,
     jobTitle: row.job_title,
@@ -56,7 +57,6 @@ function toTrackerRow(row: TrackerRowRecord, includeOwner = false): TrackerRow {
   };
 
   if (includeOwner) {
-    base.userId = row.user_id;
     base.ownerName = row.owner_name ?? undefined;
     base.ownerEmail = row.owner_email ?? undefined;
   }
