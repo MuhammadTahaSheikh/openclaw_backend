@@ -22,6 +22,14 @@ export type CreateMemberRequest = {
   notes?: string;
 };
 
+export type UpdateMemberRequest = {
+  name?: string;
+  email?: string;
+  phone?: string | null;
+  role?: string | null;
+  notes?: string | null;
+};
+
 export type InviteDetails = {
   email: string;
   name: string;

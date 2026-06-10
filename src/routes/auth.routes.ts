@@ -1,7 +1,14 @@
 import { Router } from "express";
-import { acceptInvite, findInviteByToken } from "../db/members.repository.js";
+import { acceptInvite, findInviteByToken, findMemberByEmail } from "../db/members.repository.js";
 import { isDatabaseConfigured } from "../db/index.js";
-import { countUsers, createUser, findUserByEmail, verifyPassword } from "../db/users.repository.js";
+import {
+  countUsers,
+  createUser,
+  findUserByEmail,
+  findUserById,
+  syncAdminRoleFromMember,
+  verifyPassword,
+} from "../db/users.repository.js";
 import { authMiddleware, signToken, type AuthenticatedRequest } from "../middleware/auth.middleware.js";
 import type { LoginRequest } from "../types/user.js";
 
@@ -41,6 +48,7 @@ authRouter.post("/login", async (req, res) => {
         id: user.id,
         email: user.email,
         name: user.name,
+        role: user.role,
         createdAt: user.createdAt,
       },
     });
@@ -96,19 +104,23 @@ authRouter.post("/set-password", async (req, res) => {
       return;
     }
 
+    const memberRecord = await findMemberByEmail(invite.email);
     const user = await createUser({
       email: invite.email,
       password,
       name: invite.name,
+      role: memberRecord?.role?.trim().toLowerCase() === "admin" ? "admin" : "member",
     });
 
     await acceptInvite(token, user.id);
+    await syncAdminRoleFromMember(user.id, memberRecord?.role ?? null);
 
-    const jwtToken = signToken({ userId: user.id, email: user.email });
+    const savedUser = (await findUserById(user.id)) ?? user;
+    const jwtToken = signToken({ userId: savedUser.id, email: savedUser.email });
 
     res.json({
       token: jwtToken,
-      user,
+      user: savedUser,
       message: "Password set successfully. You can now sign in.",
     });
   } catch (error) {
@@ -118,7 +130,12 @@ authRouter.post("/set-password", async (req, res) => {
 });
 
 authRouter.get("/me", authMiddleware, async (req: AuthenticatedRequest, res) => {
-  res.json({ user: req.user });
+  const user = await findUserById(req.user!.id);
+  if (!user) {
+    res.status(401).json({ error: "Invalid token" });
+    return;
+  }
+  res.json({ user });
 });
 
 authRouter.post("/register", async (req, res) => {
@@ -145,6 +162,7 @@ authRouter.post("/register", async (req, res) => {
       email,
       password,
       name: name?.trim() || email.split("@")[0],
+      role: "admin",
     });
 
     const token = signToken({ userId: user.id, email: user.email });

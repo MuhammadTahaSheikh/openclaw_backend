@@ -8,6 +8,7 @@ import { categoriesRouter } from "./routes/categories.routes.js";
 import { leadsRouter } from "./routes/leads.routes.js";
 import { membersRouter } from "./routes/members.routes.js";
 import { platformsRouter } from "./routes/platforms.routes.js";
+import { trackerRouter } from "./routes/tracker.routes.js";
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
@@ -26,7 +27,8 @@ app.get("/", (_req, res) => {
       platforms: "GET /api/platforms",
       categories: "GET /api/categories",
       leads: "GET /api/leads",
-      runBot: "POST /api/bot/run",
+      runBot: "POST /api/bot/run (auth required)",
+      botRuns: "GET /api/bot/runs (auth required)",
       login: "POST /api/auth/login",
       members: "GET/POST /api/members",
     },
@@ -39,6 +41,7 @@ app.use("/api/categories", categoriesRouter);
 app.use("/api/leads", leadsRouter);
 app.use("/api/members", membersRouter);
 app.use("/api/bot", botRouter);
+app.use("/api/tracker", trackerRouter);
 
 async function start() {
   await initDatabase();

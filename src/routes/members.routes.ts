@@ -1,10 +1,17 @@
 import { Router } from "express";
-import { createMemberWithInvite, findMemberByEmail, listMembers, refreshMemberInvite } from "../db/members.repository.js";
+import {
+  createMemberWithInvite,
+  deleteMember,
+  findMemberByEmail,
+  listMembers,
+  refreshMemberInvite,
+  updateMember,
+} from "../db/members.repository.js";
 import { isDatabaseConfigured } from "../db/index.js";
 import { findUserByEmail } from "../db/users.repository.js";
 import { authMiddleware, type AuthenticatedRequest } from "../middleware/auth.middleware.js";
 import { sendMemberInvite } from "../services/email.service.js";
-import type { CreateMemberRequest } from "../types/member.js";
+import type { CreateMemberRequest, UpdateMemberRequest } from "../types/member.js";
 import { getInviteUrl } from "../utils/invite-token.js";
 
 export const membersRouter = Router();
@@ -77,6 +84,82 @@ membersRouter.post("/", async (req: AuthenticatedRequest, res) => {
     const message = error instanceof Error ? error.message : "Failed to create member";
     const status = message.includes("Duplicate") ? 409 : 500;
     res.status(status).json({ error: message });
+  }
+});
+
+membersRouter.put("/:id", async (req: AuthenticatedRequest, res) => {
+  try {
+    if (!isDatabaseConfigured()) {
+      res.status(503).json({ error: "Database is not configured" });
+      return;
+    }
+
+    const memberId = Number(req.params.id);
+    if (!Number.isFinite(memberId)) {
+      res.status(400).json({ error: "Invalid member id" });
+      return;
+    }
+
+    const body = req.body as UpdateMemberRequest;
+
+    if (body.name !== undefined && !body.name.trim()) {
+      res.status(400).json({ error: "Name cannot be empty" });
+      return;
+    }
+
+    if (body.email !== undefined) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      const normalizedEmail = body.email.toLowerCase().trim();
+      if (!emailRegex.test(normalizedEmail)) {
+        res.status(400).json({ error: "Invalid email address" });
+        return;
+      }
+
+      const existingUser = await findUserByEmail(normalizedEmail);
+      const member = await findMemberByEmail(normalizedEmail);
+      if (existingUser || (member && member.id !== memberId)) {
+        res.status(409).json({ error: "This email is already in use" });
+        return;
+      }
+    }
+
+    const updated = await updateMember(memberId, body);
+    if (!updated) {
+      res.status(404).json({ error: "Member not found" });
+      return;
+    }
+
+    res.json({ member: updated, message: "Member updated" });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to update member";
+    const status = message.includes("Cannot change") || message.includes("already exists") ? 409 : 500;
+    res.status(status).json({ error: message });
+  }
+});
+
+membersRouter.delete("/:id", async (req: AuthenticatedRequest, res) => {
+  try {
+    if (!isDatabaseConfigured()) {
+      res.status(503).json({ error: "Database is not configured" });
+      return;
+    }
+
+    const memberId = Number(req.params.id);
+    if (!Number.isFinite(memberId)) {
+      res.status(400).json({ error: "Invalid member id" });
+      return;
+    }
+
+    const deleted = await deleteMember(memberId);
+    if (!deleted) {
+      res.status(404).json({ error: "Member not found" });
+      return;
+    }
+
+    res.json({ ok: true, message: "Member deleted" });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to delete member";
+    res.status(500).json({ error: message });
   }
 });
 

@@ -1,12 +1,13 @@
 import bcrypt from "bcryptjs";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import { getPool, isDatabaseConfigured } from "./index.js";
-import type { User } from "../types/user.js";
+import type { User, UserRole } from "../types/user.js";
 
 type UserRow = RowDataPacket & {
   id: number;
   email: string;
   name: string;
+  role: UserRole;
   password_hash: string;
   created_at: Date;
 };
@@ -16,6 +17,7 @@ function toUser(row: UserRow): User {
     id: row.id,
     email: row.email,
     name: row.name,
+    role: row.role ?? "member",
     createdAt: row.created_at.toISOString(),
   };
 }
@@ -25,7 +27,7 @@ export async function findUserByEmail(email: string): Promise<(User & { password
 
   const db = getPool();
   const [rows] = await db.execute<UserRow[]>(
-    "SELECT id, email, name, password_hash, created_at FROM users WHERE email = ? LIMIT 1",
+    "SELECT id, email, name, role, password_hash, created_at FROM users WHERE email = ? LIMIT 1",
     [email.toLowerCase().trim()],
   );
 
@@ -40,7 +42,7 @@ export async function findUserById(id: number): Promise<User | null> {
 
   const db = getPool();
   const [rows] = await db.execute<UserRow[]>(
-    "SELECT id, email, name, password_hash, created_at FROM users WHERE id = ? LIMIT 1",
+    "SELECT id, email, name, role, password_hash, created_at FROM users WHERE id = ? LIMIT 1",
     [id],
   );
 
@@ -48,17 +50,31 @@ export async function findUserById(id: number): Promise<User | null> {
   return row ? toUser(row) : null;
 }
 
+export async function listUsers(): Promise<User[]> {
+  const db = getPool();
+  const [rows] = await db.execute<UserRow[]>(
+    "SELECT id, email, name, role, password_hash, created_at FROM users ORDER BY name ASC",
+  );
+  return rows.map(toUser);
+}
+
 export async function createUser(input: {
   email: string;
   password: string;
   name: string;
+  role?: UserRole;
 }): Promise<User> {
   const db = getPool();
   const passwordHash = await bcrypt.hash(input.password, 10);
 
   const [result] = await db.execute<ResultSetHeader>(
-    "INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)",
-    [input.email.toLowerCase().trim(), passwordHash, input.name.trim()],
+    "INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, ?, ?)",
+    [
+      input.email.toLowerCase().trim(),
+      passwordHash,
+      input.name.trim(),
+      input.role ?? "member",
+    ],
   );
 
   const user = await findUserById(result.insertId);
@@ -69,6 +85,17 @@ export async function createUser(input: {
 
 export async function verifyPassword(password: string, passwordHash: string): Promise<boolean> {
   return bcrypt.compare(password, passwordHash);
+}
+
+export async function setUserRole(userId: number, role: UserRole): Promise<void> {
+  const db = getPool();
+  await db.execute("UPDATE users SET role = ? WHERE id = ?", [role, userId]);
+}
+
+export async function syncAdminRoleFromMember(userId: number, memberRole: string | null): Promise<void> {
+  if (memberRole?.trim().toLowerCase() === "admin") {
+    await setUserRole(userId, "admin");
+  }
 }
 
 export async function countUsers(): Promise<number> {

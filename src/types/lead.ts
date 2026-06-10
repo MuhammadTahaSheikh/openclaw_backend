@@ -11,6 +11,13 @@ export type Lead = {
   keyword: string;
 };
 
+export type BotRunBy = {
+  userId: number;
+  memberId: number | null;
+  name: string;
+  email: string;
+};
+
 export type BotRunRequest = {
   platform: string;
   category?: string;
@@ -33,6 +40,26 @@ export type BotRunResult = {
   totalFound: number;
   savedToDatabase: number;
   skippedDuplicates: number;
+  runBy: BotRunBy | null;
+  runAt: string;
   leads: Lead[];
   scrapedAt: string;
+};
+
+export type BotRunHistoryItem = {
+  id: number;
+  platform: string;
+  category: string;
+  keyword: string;
+  startDate: string | null;
+  endDate: string | null;
+  totalFound: number;
+  totalScanned: number;
+  totalRelevant: number;
+  runBy: BotRunBy | null;
+  runAt: string;
+};
+
+export type BotRunDetail = BotRunHistoryItem & {
+  leads: Lead[];
 };

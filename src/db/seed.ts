@@ -15,7 +15,7 @@ export async function seedAdminUser(): Promise<void> {
 
   const passwordHash = await bcrypt.hash(adminPassword, 10);
   await db.execute(
-    "INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)",
+    "INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, ?, 'admin')",
     [adminEmail.toLowerCase().trim(), passwordHash, process.env.ADMIN_NAME?.trim() || "Admin"],
   );
 

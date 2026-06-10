@@ -1,6 +1,13 @@
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import { getPool } from "./index.js";
-import type { CreateMemberRequest, InviteDetails, Member, MemberInviteStatus } from "../types/member.js";
+import type {
+  CreateMemberRequest,
+  InviteDetails,
+  Member,
+  MemberInviteStatus,
+  UpdateMemberRequest,
+} from "../types/member.js";
+import { syncAdminRoleFromMember } from "./users.repository.js";
 import { generateInviteToken, getInviteExpiresAt } from "../utils/invite-token.js";
 
 type MemberRow = RowDataPacket & {
@@ -33,6 +40,17 @@ function toMember(row: MemberRow): Member {
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
+}
+
+export async function findMemberByUserId(userId: number): Promise<Member | null> {
+  const db = getPool();
+  const [rows] = await db.execute<MemberRow[]>(
+    `SELECT id, name, email, phone, role, notes, created_by, user_id, invite_status,
+            invite_token, invite_expires_at, created_at, updated_at
+     FROM members WHERE user_id = ? LIMIT 1`,
+    [userId],
+  );
+  return rows[0] ? toMember(rows[0]) : null;
 }
 
 export async function findMemberByEmail(email: string): Promise<Member | null> {
@@ -152,6 +170,8 @@ export async function acceptInvite(token: string, userId: number): Promise<Membe
   const member = updated[0];
   if (!member) throw new Error("Failed to accept invite");
 
+  await syncAdminRoleFromMember(userId, member.role);
+
   return toMember(member);
 }
 
@@ -191,4 +211,58 @@ export async function refreshMemberInvite(memberId: number): Promise<{ member: M
   if (!updated) throw new Error("Failed to refresh invite");
 
   return { member: updated, inviteToken };
+}
+
+export async function updateMember(id: number, input: UpdateMemberRequest): Promise<Member | null> {
+  const db = getPool();
+  const existing = await findMemberById(id);
+  if (!existing) return null;
+
+  const name = input.name !== undefined ? input.name.trim() : existing.name;
+  const phone = input.phone !== undefined ? input.phone?.trim() || null : existing.phone;
+  const role = input.role !== undefined ? input.role?.trim() || null : existing.role;
+  const notes = input.notes !== undefined ? input.notes?.trim() || null : existing.notes;
+
+  let email = existing.email;
+  if (input.email !== undefined) {
+    if (existing.inviteStatus === "accepted" || existing.userId) {
+      throw new Error("Cannot change email for a member who already has an account");
+    }
+    email = input.email.toLowerCase().trim();
+    if (email !== existing.email) {
+      const duplicate = await findMemberByEmail(email);
+      if (duplicate && duplicate.id !== id) {
+        throw new Error("A member with this email already exists");
+      }
+    }
+  }
+
+  await db.execute(
+    `UPDATE members
+     SET name = ?, email = ?, phone = ?, role = ?, notes = ?
+     WHERE id = ?`,
+    [name, email, phone, role, notes, id],
+  );
+
+  if (existing.userId) {
+    await syncAdminRoleFromMember(existing.userId, role);
+  }
+
+  return findMemberById(id);
+}
+
+export async function deleteMember(id: number): Promise<boolean> {
+  const db = getPool();
+  const existing = await findMemberById(id);
+  if (!existing) return false;
+
+  const userId = existing.userId;
+
+  await db.execute("DELETE FROM members WHERE id = ?", [id]);
+
+  if (userId) {
+    await db.execute("DELETE FROM users WHERE id = ?", [userId]);
+  }
+
+  return true;
 }

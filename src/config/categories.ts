@@ -2,6 +2,8 @@ export type Category = {
   id: string;
   label: string;
   keyword: string;
+  /** Extra platform searches; results are merged and deduped by job id. */
+  searchKeywords?: string[];
   matchTerms: string[];
   /** When true, extra filter removes platform false positives (e.g. bookkeeping). */
   strictRelevance: boolean;
@@ -138,6 +140,42 @@ export const categories: Category[] = [
     matchTerms: ["lead generation", "lead gen", "appointment setter", "cold calling", "outbound"],
     strictRelevance: false,
   },
+  {
+    id: "ghl",
+    label: "GHL (GoHighLevel, Zapier, n8n)",
+    keyword: "gohighlevel",
+    searchKeywords: [
+      "gohighlevel",
+      "zapier",
+      "n8n",
+      "make.com",
+      "integromat",
+      "activecampaign",
+      "clickfunnels",
+      "crm automation",
+    ],
+    matchTerms: [
+      "gohighlevel",
+      "go high level",
+      "ghl",
+      "highlevel",
+      "high level",
+      "zapier",
+      "n8n",
+      "make.com",
+      "make com",
+      "integromat",
+      "activecampaign",
+      "active campaign",
+      "clickfunnels",
+      "click funnels",
+      "crm automation",
+      "workflow automation",
+      "automation specialist",
+      "marketing automation",
+    ],
+    strictRelevance: false,
+  },
 ];
 
 export function listCategories() {
@@ -160,6 +198,14 @@ export function getCategoryKeyword(categoryIdOrLabel: string): string {
     throw new Error(`Unknown category: ${categoryIdOrLabel}`);
   }
   return category.keyword;
+}
+
+export function getCategorySearchKeywords(categoryIdOrLabel: string): string[] {
+  const category = findCategory(categoryIdOrLabel);
+  if (!category) {
+    throw new Error(`Unknown category: ${categoryIdOrLabel}`);
+  }
+  return category.searchKeywords?.length ? category.searchKeywords : [category.keyword];
 }
 
 export function getCategoryLabel(categoryIdOrLabel: string): string {
