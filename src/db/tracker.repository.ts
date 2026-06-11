@@ -8,6 +8,7 @@ type TrackerRowRecord = RowDataPacket & {
   row_date: string | Date | null;
   name: string | null;
   job_title: string | null;
+  employment_type: string | null;
   email: string | null;
   linkedin: string | null;
   phone: string | null;
@@ -44,6 +45,7 @@ function toTrackerRow(row: TrackerRowRecord, includeOwner = false): TrackerRow {
     date: formatRowDate(row.row_date),
     name: row.name,
     jobTitle: row.job_title,
+    employmentType: row.employment_type,
     email: row.email,
     linkedin: row.linkedin,
     phone: row.phone,
@@ -69,6 +71,7 @@ function normalizeInput(input: TrackerRowInput): (string | null)[] {
     formatRowDate(input.date ?? null),
     input.name?.trim() || null,
     input.jobTitle?.trim() || null,
+    input.employmentType?.trim() || null,
     input.email?.trim() || null,
     input.linkedin?.trim() || null,
     input.phone?.trim() || null,
@@ -79,7 +82,7 @@ function normalizeInput(input: TrackerRowInput): (string | null)[] {
   ];
 }
 
-const ROW_SELECT = `r.id, r.user_id, r.row_date, r.name, r.job_title, r.email, r.linkedin, r.phone,
+const ROW_SELECT = `r.id, r.user_id, r.row_date, r.name, r.job_title, r.employment_type, r.email, r.linkedin, r.phone,
   r.source, r.remarks, r.connects, r.project_price, r.sort_order, r.created_at, r.updated_at`;
 
 export async function listTrackerUsersWithRows(): Promise<TrackerUserOption[]> {
@@ -147,8 +150,8 @@ export async function createTrackerRow(userId: number, input: TrackerRowInput): 
 
   const [result] = await db.execute<ResultSetHeader>(
     `INSERT INTO user_tracker_rows
-      (user_id, row_date, name, job_title, email, linkedin, phone, source, remarks, connects, project_price, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (user_id, row_date, name, job_title, employment_type, email, linkedin, phone, source, remarks, connects, project_price, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [userId, ...values, sortOrder],
   );
 
@@ -200,7 +203,7 @@ export async function updateTrackerRow(
 
   const [result] = await db.execute<ResultSetHeader>(
     `UPDATE user_tracker_rows
-     SET row_date = ?, name = ?, job_title = ?, email = ?, linkedin = ?, phone = ?,
+     SET row_date = ?, name = ?, job_title = ?, employment_type = ?, email = ?, linkedin = ?, phone = ?,
          source = ?, remarks = ?, connects = ?, project_price = ?
      WHERE id = ? ${userClause}`,
     params,

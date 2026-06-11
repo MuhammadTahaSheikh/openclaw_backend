@@ -132,6 +132,7 @@ export async function migrateTrackerTable(db: Pool): Promise<void> {
       row_date DATE NULL,
       name VARCHAR(255) NULL,
       job_title VARCHAR(500) NULL,
+      employment_type VARCHAR(50) NULL,
       email VARCHAR(255) NULL,
       linkedin VARCHAR(500) NULL,
       phone VARCHAR(50) NULL,
@@ -146,4 +147,10 @@ export async function migrateTrackerTable(db: Pool): Promise<void> {
       CONSTRAINT fk_tracker_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )
   `);
+
+  if (!(await columnExists(db, "user_tracker_rows", "employment_type"))) {
+    await db.execute(
+      "ALTER TABLE user_tracker_rows ADD COLUMN employment_type VARCHAR(50) NULL AFTER job_title",
+    );
+  }
 }
