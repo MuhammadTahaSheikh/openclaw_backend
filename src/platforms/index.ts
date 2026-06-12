@@ -1,17 +1,14 @@
 import { createStubPlatform } from "./stub-platform.js";
 import { onlineJobsPhScraper } from "./onlinejobs-ph.js";
+import { upworkScraper } from "./upwork.js";
 import type { PlatformScraper } from "./types.js";
+
+const ENABLED_PLATFORMS = new Set(["onlinejobs-ph", "upwork"]);
 
 export const linkedInScraper = createStubPlatform(
   "linkedin",
   "LinkedIn",
   "Professional network — job posts and lead search (coming soon)",
-);
-
-export const upworkScraper = createStubPlatform(
-  "upwork",
-  "Upwork",
-  "Freelance marketplace for remote projects (coming soon)",
 );
 
 export const fiverrScraper = createStubPlatform(
@@ -39,7 +36,7 @@ export function listPlatforms() {
     id,
     name,
     description,
-    enabled: id === "onlinejobs-ph",
+    enabled: ENABLED_PLATFORMS.has(id),
   }));
 }
 

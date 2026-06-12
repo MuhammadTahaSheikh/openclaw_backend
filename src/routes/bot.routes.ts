@@ -12,7 +12,9 @@ botRouter.use(authMiddleware);
 botRouter.get("/runs", async (req, res) => {
   try {
     const limit = req.query.limit ? Number(req.query.limit) : 50;
-    const runs = await getBotRunHistory(limit);
+    const date = typeof req.query.date === "string" ? req.query.date : undefined;
+    const category = typeof req.query.category === "string" ? req.query.category : undefined;
+    const runs = await getBotRunHistory({ limit, date, category });
     res.json({ runs });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch run history";

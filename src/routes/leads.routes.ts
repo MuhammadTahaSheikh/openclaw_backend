@@ -1,8 +1,11 @@
 import { Router } from "express";
 import { getStoredLeads } from "../db/leads.repository.js";
 import { isDatabaseConfigured } from "../db/index.js";
+import { authMiddleware } from "../middleware/auth.middleware.js";
 
 export const leadsRouter = Router();
+
+leadsRouter.use(authMiddleware);
 
 leadsRouter.get("/", async (req, res) => {
   try {

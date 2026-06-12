@@ -1,5 +1,6 @@
 import type { ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import type { Pool } from "mysql2/promise";
+import { getCategoryFilterValues } from "../config/categories.js";
 import { getPool, isDatabaseConfigured } from "../db/index.js";
 import type { BotRunBy, BotRunDetail, BotRunHistoryItem, BotRunResult, Lead } from "../types/lead.js";
 
@@ -103,6 +104,24 @@ function toMysqlDatetime(iso: string): string {
   return iso.slice(0, 19).replace("T", " ");
 }
 
+function applyCategoryFilter(
+  conditions: string[],
+  params: Array<string | number>,
+  category: string,
+): void {
+  const values = getCategoryFilterValues(category);
+  if (values.length === 0) return;
+
+  if (values.length === 1) {
+    conditions.push("category = ?");
+    params.push(values[0]);
+    return;
+  }
+
+  conditions.push(`category IN (${values.map(() => "?").join(", ")})`);
+  params.push(...values);
+}
+
 export async function saveBotRunResult(
   result: BotRunResult,
   runBy: BotRunBy | null,
@@ -174,19 +193,40 @@ export async function saveBotRunResult(
   return { saved, skipped };
 }
 
-export async function getBotRunHistory(limit = 50): Promise<BotRunHistoryItem[]> {
+export type BotRunHistoryQuery = {
+  limit?: number;
+  date?: string;
+  category?: string;
+};
+
+export async function getBotRunHistory(query: BotRunHistoryQuery = {}): Promise<BotRunHistoryItem[]> {
   if (!isDatabaseConfigured()) return [];
 
   const db = getPool();
-  const safeLimit = Math.min(Math.max(limit, 1), 200);
+  const safeLimit = Math.min(Math.max(query.limit ?? 50, 1), 200);
+  const conditions: string[] = [];
+  const params: Array<string | number> = [];
+
+  if (query.date) {
+    conditions.push("DATE(scraped_at) = ?");
+    params.push(query.date);
+  }
+
+  if (query.category) {
+    applyCategoryFilter(conditions, params, query.category);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
   const [rows] = await db.execute<BotRunRow[]>(
     `SELECT id, platform, category, keyword, start_date, end_date,
             total_scanned, total_relevant, total_found, scraped_at,
             run_by_user_id, run_by_member_id, run_by_name, run_by_email
      FROM bot_runs
+     ${whereClause}
      ORDER BY scraped_at DESC, id DESC
      LIMIT ${safeLimit}`,
+    params,
   );
 
   return rows.map(mapBotRunRow);
@@ -259,8 +299,7 @@ export async function getStoredLeads(query: LeadQuery = {}): Promise<Lead[]> {
   }
 
   if (query.category) {
-    conditions.push("category = ?");
-    params.push(query.category);
+    applyCategoryFilter(conditions, params, query.category);
   }
 
   if (query.startDate) {

@@ -153,6 +153,9 @@ export const categories: Category[] = [
       "activecampaign",
       "clickfunnels",
       "crm automation",
+      "funnel builder",
+      "funnel design",
+      "ai automation",
     ],
     matchTerms: [
       "gohighlevel",
@@ -173,6 +176,11 @@ export const categories: Category[] = [
       "workflow automation",
       "automation specialist",
       "marketing automation",
+      "funnel builder",
+      "funnel design",
+      "ai automation",
+      "sales funnel",
+      "landing page funnel",
     ],
     strictRelevance: false,
   },
@@ -190,6 +198,19 @@ function findCategory(categoryIdOrLabel: string): Category | undefined {
       item.label.toLowerCase() === normalized ||
       item.id === categoryIdOrLabel,
   );
+}
+
+/** Values stored in DB may be category id or label — match both when filtering. */
+export function getCategoryFilterValues(categoryIdOrLabel: string): string[] {
+  const trimmed = categoryIdOrLabel.trim();
+  if (!trimmed) return [];
+
+  const category = findCategory(trimmed);
+  if (category) {
+    return [...new Set([category.id, category.label])];
+  }
+
+  return [trimmed];
 }
 
 export function getCategoryKeyword(categoryIdOrLabel: string): string {
