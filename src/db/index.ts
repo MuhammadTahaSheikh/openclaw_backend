@@ -1,5 +1,11 @@
 import mysql from "mysql2/promise";
-import { migrateBotRunsTable, migrateMembersTable, migrateTrackerTable, migrateUsersTable } from "./migrate.js";
+import {
+  migrateBotRunsTable,
+  migrateMemberAccessColumns,
+  migrateMembersTable,
+  migrateTrackerTable,
+  migrateUsersTable,
+} from "./migrate.js";
 import { seedAdminUser } from "./seed.js";
 
 let pool: mysql.Pool | null = null;
@@ -116,6 +122,7 @@ export async function initDatabase(): Promise<void> {
   `);
 
   await migrateMembersTable(db);
+  await migrateMemberAccessColumns(db);
   await migrateBotRunsTable(db);
   await migrateUsersTable(db);
   await migrateTrackerTable(db);

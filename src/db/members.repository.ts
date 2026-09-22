@@ -7,8 +7,10 @@ import type {
   MemberInviteStatus,
   UpdateMemberRequest,
 } from "../types/member.js";
-import { syncAdminRoleFromMember } from "./users.repository.js";
+import type { UserRole } from "../types/user.js";
+import { setUserAccess } from "./users.repository.js";
 import { generateInviteToken, getInviteExpiresAt } from "../utils/invite-token.js";
+import { normalizeStringList, parseJsonStringArray } from "../utils/access.js";
 
 type MemberRow = RowDataPacket & {
   id: number;
@@ -17,6 +19,9 @@ type MemberRow = RowDataPacket & {
   phone: string | null;
   role: string | null;
   notes: string | null;
+  app_role: UserRole;
+  allowed_platforms: unknown;
+  allowed_categories: unknown;
   created_by: number | null;
   user_id: number | null;
   invite_status: MemberInviteStatus;
@@ -26,7 +31,37 @@ type MemberRow = RowDataPacket & {
   updated_at: Date;
 };
 
+const MEMBER_SELECT = `
+  SELECT id, name, email, phone, role, notes, app_role, allowed_platforms, allowed_categories,
+         created_by, user_id, invite_status, invite_token, invite_expires_at, created_at, updated_at
+  FROM members
+`;
+
+function resolveAppRole(input: { appRole?: UserRole; role?: string | null }): UserRole {
+  if (input.appRole === "admin" || input.appRole === "member" || input.appRole === "employee") {
+    return input.appRole;
+  }
+  if (input.role?.trim().toLowerCase() === "admin") return "admin";
+  return "member";
+}
+
+function allowlistsForRole(
+  role: UserRole,
+  platforms: unknown,
+  categories: unknown,
+): { allowedPlatforms: string[] | null; allowedCategories: string[] | null } {
+  if (role !== "employee") {
+    return { allowedPlatforms: null, allowedCategories: null };
+  }
+  return {
+    allowedPlatforms: normalizeStringList(platforms ?? []),
+    allowedCategories: normalizeStringList(categories ?? []),
+  };
+}
+
 function toMember(row: MemberRow): Member {
+  const appRole = row.app_role ?? "member";
+  const allowlists = allowlistsForRole(appRole, row.allowed_platforms, row.allowed_categories);
   return {
     id: row.id,
     name: row.name,
@@ -34,6 +69,10 @@ function toMember(row: MemberRow): Member {
     phone: row.phone,
     role: row.role,
     notes: row.notes,
+    appRole,
+    allowedPlatforms: appRole === "employee" ? allowlists.allowedPlatforms : parseJsonStringArray(row.allowed_platforms),
+    allowedCategories:
+      appRole === "employee" ? allowlists.allowedCategories : parseJsonStringArray(row.allowed_categories),
     createdBy: row.created_by,
     userId: row.user_id,
     inviteStatus: row.invite_status,
@@ -44,23 +83,15 @@ function toMember(row: MemberRow): Member {
 
 export async function findMemberByUserId(userId: number): Promise<Member | null> {
   const db = getPool();
-  const [rows] = await db.execute<MemberRow[]>(
-    `SELECT id, name, email, phone, role, notes, created_by, user_id, invite_status,
-            invite_token, invite_expires_at, created_at, updated_at
-     FROM members WHERE user_id = ? LIMIT 1`,
-    [userId],
-  );
+  const [rows] = await db.execute<MemberRow[]>(`${MEMBER_SELECT} WHERE user_id = ? LIMIT 1`, [userId]);
   return rows[0] ? toMember(rows[0]) : null;
 }
 
 export async function findMemberByEmail(email: string): Promise<Member | null> {
   const db = getPool();
-  const [rows] = await db.execute<MemberRow[]>(
-    `SELECT id, name, email, phone, role, notes, created_by, user_id, invite_status,
-            invite_token, invite_expires_at, created_at, updated_at
-     FROM members WHERE email = ? LIMIT 1`,
-    [email.toLowerCase().trim()],
-  );
+  const [rows] = await db.execute<MemberRow[]>(`${MEMBER_SELECT} WHERE email = ? LIMIT 1`, [
+    email.toLowerCase().trim(),
+  ]);
 
   const row = rows[0];
   return row ? toMember(row) : null;
@@ -68,11 +99,7 @@ export async function findMemberByEmail(email: string): Promise<Member | null> {
 
 export async function listMembers(): Promise<Member[]> {
   const db = getPool();
-  const [rows] = await db.execute<MemberRow[]>(
-    `SELECT id, name, email, phone, role, notes, created_by, user_id, invite_status,
-            invite_token, invite_expires_at, created_at, updated_at
-     FROM members ORDER BY created_at DESC`,
-  );
+  const [rows] = await db.execute<MemberRow[]>(`${MEMBER_SELECT} ORDER BY created_at DESC`);
 
   return rows.map(toMember);
 }
@@ -84,28 +111,30 @@ export async function createMemberWithInvite(
   const db = getPool();
   const inviteToken = generateInviteToken();
   const inviteExpiresAt = getInviteExpiresAt();
+  const appRole = resolveAppRole(input);
+  const allowlists = allowlistsForRole(appRole, input.allowedPlatforms, input.allowedCategories);
 
   const [result] = await db.execute<ResultSetHeader>(
-    `INSERT INTO members (name, email, phone, role, notes, created_by, invite_token, invite_expires_at, invite_status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+    `INSERT INTO members
+      (name, email, phone, role, notes, app_role, allowed_platforms, allowed_categories,
+       created_by, invite_token, invite_expires_at, invite_status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
     [
       input.name.trim(),
       input.email.toLowerCase().trim(),
       input.phone?.trim() || null,
       input.role?.trim() || null,
       input.notes?.trim() || null,
+      appRole,
+      appRole === "employee" ? JSON.stringify(allowlists.allowedPlatforms) : null,
+      appRole === "employee" ? JSON.stringify(allowlists.allowedCategories) : null,
       createdBy,
       inviteToken,
       inviteExpiresAt,
     ],
   );
 
-  const [rows] = await db.execute<MemberRow[]>(
-    `SELECT id, name, email, phone, role, notes, created_by, user_id, invite_status,
-            invite_token, invite_expires_at, created_at, updated_at
-     FROM members WHERE id = ?`,
-    [result.insertId],
-  );
+  const [rows] = await db.execute<MemberRow[]>(`${MEMBER_SELECT} WHERE id = ?`, [result.insertId]);
 
   const row = rows[0];
   if (!row) throw new Error("Failed to create member");
@@ -137,12 +166,7 @@ export async function findInviteByToken(token: string): Promise<InviteDetails | 
 
 export async function acceptInvite(token: string, userId: number): Promise<Member> {
   const db = getPool();
-  const [rows] = await db.execute<MemberRow[]>(
-    `SELECT id, name, email, phone, role, notes, created_by, user_id, invite_status,
-            invite_token, invite_expires_at, created_at, updated_at
-     FROM members WHERE invite_token = ? LIMIT 1`,
-    [token],
-  );
+  const [rows] = await db.execute<MemberRow[]>(`${MEMBER_SELECT} WHERE invite_token = ? LIMIT 1`, [token]);
 
   const row = rows[0];
   if (!row || row.invite_status !== "pending" || row.user_id) {
@@ -160,29 +184,24 @@ export async function acceptInvite(token: string, userId: number): Promise<Membe
     [userId, row.id],
   );
 
-  const [updated] = await db.execute<MemberRow[]>(
-    `SELECT id, name, email, phone, role, notes, created_by, user_id, invite_status,
-            invite_token, invite_expires_at, created_at, updated_at
-     FROM members WHERE id = ?`,
-    [row.id],
-  );
+  const [updated] = await db.execute<MemberRow[]>(`${MEMBER_SELECT} WHERE id = ?`, [row.id]);
 
   const member = updated[0];
   if (!member) throw new Error("Failed to accept invite");
 
-  await syncAdminRoleFromMember(userId, member.role);
+  const mapped = toMember(member);
+  await setUserAccess(userId, {
+    role: mapped.appRole,
+    allowedPlatforms: mapped.allowedPlatforms,
+    allowedCategories: mapped.allowedCategories,
+  });
 
-  return toMember(member);
+  return mapped;
 }
 
 export async function findMemberById(id: number): Promise<Member | null> {
   const db = getPool();
-  const [rows] = await db.execute<MemberRow[]>(
-    `SELECT id, name, email, phone, role, notes, created_by, user_id, invite_status,
-            invite_token, invite_expires_at, created_at, updated_at
-     FROM members WHERE id = ? LIMIT 1`,
-    [id],
-  );
+  const [rows] = await db.execute<MemberRow[]>(`${MEMBER_SELECT} WHERE id = ? LIMIT 1`, [id]);
 
   const row = rows[0];
   return row ? toMember(row) : null;
@@ -222,6 +241,15 @@ export async function updateMember(id: number, input: UpdateMemberRequest): Prom
   const phone = input.phone !== undefined ? input.phone?.trim() || null : existing.phone;
   const role = input.role !== undefined ? input.role?.trim() || null : existing.role;
   const notes = input.notes !== undefined ? input.notes?.trim() || null : existing.notes;
+  const appRole = resolveAppRole({
+    appRole: input.appRole ?? existing.appRole,
+    role,
+  });
+  const allowlists = allowlistsForRole(
+    appRole,
+    input.allowedPlatforms !== undefined ? input.allowedPlatforms : existing.allowedPlatforms,
+    input.allowedCategories !== undefined ? input.allowedCategories : existing.allowedCategories,
+  );
 
   let email = existing.email;
   if (input.email !== undefined) {
@@ -239,13 +267,28 @@ export async function updateMember(id: number, input: UpdateMemberRequest): Prom
 
   await db.execute(
     `UPDATE members
-     SET name = ?, email = ?, phone = ?, role = ?, notes = ?
+     SET name = ?, email = ?, phone = ?, role = ?, notes = ?,
+         app_role = ?, allowed_platforms = ?, allowed_categories = ?
      WHERE id = ?`,
-    [name, email, phone, role, notes, id],
+    [
+      name,
+      email,
+      phone,
+      role,
+      notes,
+      appRole,
+      appRole === "employee" ? JSON.stringify(allowlists.allowedPlatforms) : null,
+      appRole === "employee" ? JSON.stringify(allowlists.allowedCategories) : null,
+      id,
+    ],
   );
 
   if (existing.userId) {
-    await syncAdminRoleFromMember(existing.userId, role);
+    await setUserAccess(existing.userId, {
+      role: appRole,
+      allowedPlatforms: allowlists.allowedPlatforms,
+      allowedCategories: allowlists.allowedCategories,
+    });
   }
 
   return findMemberById(id);

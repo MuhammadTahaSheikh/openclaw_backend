@@ -6,13 +6,32 @@ import {
   createUser,
   findUserByEmail,
   findUserById,
-  syncAdminRoleFromMember,
   verifyPassword,
 } from "../db/users.repository.js";
 import { authMiddleware, signToken, type AuthenticatedRequest } from "../middleware/auth.middleware.js";
-import type { LoginRequest } from "../types/user.js";
+import type { LoginRequest, UserRole } from "../types/user.js";
 
 export const authRouter = Router();
+
+function publicUser(user: {
+  id: number;
+  email: string;
+  name: string;
+  role: UserRole;
+  allowedPlatforms: string[] | null;
+  allowedCategories: string[] | null;
+  createdAt: string;
+}) {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    allowedPlatforms: user.role === "employee" ? user.allowedPlatforms ?? [] : null,
+    allowedCategories: user.role === "employee" ? user.allowedCategories ?? [] : null,
+    createdAt: user.createdAt,
+  };
+}
 
 authRouter.post("/login", async (req, res) => {
   try {
@@ -44,13 +63,7 @@ authRouter.post("/login", async (req, res) => {
 
     res.json({
       token,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        createdAt: user.createdAt,
-      },
+      user: publicUser(user),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Login failed";
@@ -105,22 +118,25 @@ authRouter.post("/set-password", async (req, res) => {
     }
 
     const memberRecord = await findMemberByEmail(invite.email);
+    const appRole: UserRole = memberRecord?.appRole ?? "member";
+
     const user = await createUser({
       email: invite.email,
       password,
       name: invite.name,
-      role: memberRecord?.role?.trim().toLowerCase() === "admin" ? "admin" : "member",
+      role: appRole,
+      allowedPlatforms: memberRecord?.allowedPlatforms,
+      allowedCategories: memberRecord?.allowedCategories,
     });
 
     await acceptInvite(token, user.id);
-    await syncAdminRoleFromMember(user.id, memberRecord?.role ?? null);
 
     const savedUser = (await findUserById(user.id)) ?? user;
     const jwtToken = signToken({ userId: savedUser.id, email: savedUser.email });
 
     res.json({
       token: jwtToken,
-      user: savedUser,
+      user: publicUser(savedUser),
       message: "Password set successfully. You can now sign in.",
     });
   } catch (error) {
@@ -135,7 +151,7 @@ authRouter.get("/me", authMiddleware, async (req: AuthenticatedRequest, res) => 
     res.status(401).json({ error: "Invalid token" });
     return;
   }
-  res.json({ user });
+  res.json({ user: publicUser(user) });
 });
 
 authRouter.post("/register", async (req, res) => {
@@ -167,7 +183,7 @@ authRouter.post("/register", async (req, res) => {
 
     const token = signToken({ userId: user.id, email: user.email });
 
-    res.status(201).json({ token, user });
+    res.status(201).json({ token, user: publicUser(user) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Registration failed";
     res.status(500).json({ error: message });

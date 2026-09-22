@@ -96,8 +96,19 @@ export async function migrateBotRunsTable(db: Pool): Promise<void> {
 export async function migrateUsersTable(db: Pool): Promise<void> {
   if (!(await columnExists(db, "users", "role"))) {
     await db.execute(
-      "ALTER TABLE users ADD COLUMN role ENUM('admin', 'member') NOT NULL DEFAULT 'member'",
+      "ALTER TABLE users ADD COLUMN role ENUM('admin', 'member', 'employee') NOT NULL DEFAULT 'member'",
     );
+  } else {
+    await db.execute(
+      "ALTER TABLE users MODIFY COLUMN role ENUM('admin', 'member', 'employee') NOT NULL DEFAULT 'member'",
+    );
+  }
+
+  if (!(await columnExists(db, "users", "allowed_platforms"))) {
+    await db.execute("ALTER TABLE users ADD COLUMN allowed_platforms JSON NULL");
+  }
+  if (!(await columnExists(db, "users", "allowed_categories"))) {
+    await db.execute("ALTER TABLE users ADD COLUMN allowed_categories JSON NULL");
   }
 
   const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
@@ -105,12 +116,14 @@ export async function migrateUsersTable(db: Pool): Promise<void> {
     await db.execute("UPDATE users SET role = 'admin' WHERE LOWER(email) = ?", [adminEmail]);
   }
 
-  // Members with role "Admin" get app admin access (see all lead trackers).
+  // Members with job title "Admin" get app admin access (unless explicitly set to employee).
   await db.execute(`
     UPDATE users u
     INNER JOIN members m ON m.user_id = u.id
     SET u.role = 'admin'
     WHERE LOWER(TRIM(m.role)) = 'admin'
+      AND (m.app_role IS NULL OR m.app_role = 'admin')
+      AND u.role != 'employee'
   `);
 
   const [adminRows] = await db.execute<RowDataPacket[]>(
@@ -122,6 +135,32 @@ export async function migrateUsersTable(db: Pool): Promise<void> {
       "UPDATE users SET role = 'admin' WHERE id = (SELECT MIN(id) FROM (SELECT id FROM users) AS u)",
     );
   }
+}
+
+export async function migrateMemberAccessColumns(db: Pool): Promise<void> {
+  if (!(await columnExists(db, "members", "app_role"))) {
+    await db.execute(
+      "ALTER TABLE members ADD COLUMN app_role ENUM('admin', 'member', 'employee') NOT NULL DEFAULT 'member'",
+    );
+  } else {
+    await db.execute(
+      "ALTER TABLE members MODIFY COLUMN app_role ENUM('admin', 'member', 'employee') NOT NULL DEFAULT 'member'",
+    );
+  }
+
+  if (!(await columnExists(db, "members", "allowed_platforms"))) {
+    await db.execute("ALTER TABLE members ADD COLUMN allowed_platforms JSON NULL");
+  }
+  if (!(await columnExists(db, "members", "allowed_categories"))) {
+    await db.execute("ALTER TABLE members ADD COLUMN allowed_categories JSON NULL");
+  }
+
+  // Backfill app_role from job title Admin for existing rows.
+  await db.execute(`
+    UPDATE members
+    SET app_role = 'admin'
+    WHERE LOWER(TRIM(role)) = 'admin' AND app_role = 'member'
+  `);
 }
 
 export async function migrateTrackerTable(db: Pool): Promise<void> {

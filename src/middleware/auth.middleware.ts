@@ -1,12 +1,19 @@
 import type { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import { findUserById } from "../db/users.repository.js";
-import type { JwtPayload } from "../types/user.js";
+import type { JwtPayload, UserRole } from "../types/user.js";
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "dev-secret-change-me";
 
 export type AuthenticatedRequest = Request & {
-  user?: { id: number; email: string; name: string; role: "admin" | "member" };
+  user?: {
+    id: number;
+    email: string;
+    name: string;
+    role: UserRole;
+    allowedPlatforms: string[] | null;
+    allowedCategories: string[] | null;
+  };
 };
 
 export function signToken(payload: JwtPayload): string {
@@ -41,7 +48,14 @@ export async function authMiddleware(
       return;
     }
 
-    req.user = { id: user.id, email: user.email, name: user.name, role: user.role };
+    req.user = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      allowedPlatforms: user.allowedPlatforms,
+      allowedCategories: user.allowedCategories,
+    };
     next();
   } catch {
     res.status(401).json({ error: "Invalid or expired token" });

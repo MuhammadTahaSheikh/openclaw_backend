@@ -108,17 +108,18 @@ function applyCategoryFilter(
   conditions: string[],
   params: Array<string | number>,
   category: string,
+  column = "category",
 ): void {
   const values = getCategoryFilterValues(category);
   if (values.length === 0) return;
 
   if (values.length === 1) {
-    conditions.push("category = ?");
+    conditions.push(`${column} = ?`);
     params.push(values[0]);
     return;
   }
 
-  conditions.push(`category IN (${values.map(() => "?").join(", ")})`);
+  conditions.push(`${column} IN (${values.map(() => "?").join(", ")})`);
   params.push(...values);
 }
 
@@ -197,6 +198,8 @@ export type BotRunHistoryQuery = {
   limit?: number;
   date?: string;
   category?: string;
+  /** When set, only return runs created by this user. */
+  userId?: number;
 };
 
 export async function getBotRunHistory(query: BotRunHistoryQuery = {}): Promise<BotRunHistoryItem[]> {
@@ -206,6 +209,11 @@ export async function getBotRunHistory(query: BotRunHistoryQuery = {}): Promise<
   const safeLimit = Math.min(Math.max(query.limit ?? 50, 1), 200);
   const conditions: string[] = [];
   const params: Array<string | number> = [];
+
+  if (query.userId != null) {
+    conditions.push("run_by_user_id = ?");
+    params.push(query.userId);
+  }
 
   if (query.date) {
     conditions.push("DATE(scraped_at) = ?");
@@ -284,6 +292,8 @@ export type LeadQuery = {
   startDate?: string;
   endDate?: string;
   limit?: number;
+  /** When set, only return leads from this user's bot runs. */
+  runByUserId?: number;
 };
 
 export async function getStoredLeads(query: LeadQuery = {}): Promise<Lead[]> {
@@ -294,32 +304,46 @@ export async function getStoredLeads(query: LeadQuery = {}): Promise<Lead[]> {
   const params: Array<string | number> = [];
 
   if (query.platform) {
-    conditions.push("platform = ?");
+    conditions.push("l.platform = ?");
     params.push(query.platform);
   }
 
   if (query.category) {
-    applyCategoryFilter(conditions, params, query.category);
+    applyCategoryFilter(conditions, params, query.category, "l.category");
   }
 
   if (query.startDate) {
-    conditions.push("DATE(posted_at) >= ?");
+    conditions.push("DATE(l.posted_at) >= ?");
     params.push(query.startDate);
   }
 
   if (query.endDate) {
-    conditions.push("DATE(posted_at) <= ?");
+    conditions.push("DATE(l.posted_at) <= ?");
     params.push(query.endDate);
+  }
+
+  if (query.runByUserId != null) {
+    conditions.push(`(
+      l.bot_run_id IN (SELECT id FROM bot_runs WHERE run_by_user_id = ?)
+      OR l.id IN (
+        SELECT brl.lead_db_id
+        FROM bot_run_leads brl
+        INNER JOIN bot_runs br ON br.id = brl.bot_run_id
+        WHERE br.run_by_user_id = ?
+      )
+    )`);
+    params.push(query.runByUserId, query.runByUserId);
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const limit = Math.min(Math.max(query.limit ?? 100, 1), 500);
 
   const [rows] = await db.execute<LeadRow[]>(
-    `SELECT job_id, platform, category, keyword, title, employment_type, salary, posted_at, description, skills, url
-     FROM leads
+    `SELECT l.job_id, l.platform, l.category, l.keyword, l.title, l.employment_type,
+            l.salary, l.posted_at, l.description, l.skills, l.url
+     FROM leads l
      ${whereClause}
-     ORDER BY posted_at DESC, id DESC
+     ORDER BY l.posted_at DESC, l.id DESC
      LIMIT ${limit}`,
     params,
   );

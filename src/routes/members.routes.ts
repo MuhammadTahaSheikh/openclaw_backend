@@ -9,14 +9,39 @@ import {
 } from "../db/members.repository.js";
 import { isDatabaseConfigured } from "../db/index.js";
 import { findUserByEmail } from "../db/users.repository.js";
+import { requireMemberManager } from "../middleware/admin.middleware.js";
 import { authMiddleware, type AuthenticatedRequest } from "../middleware/auth.middleware.js";
-import { sendMemberInvite } from "../services/email.service.js";
 import type { CreateMemberRequest, UpdateMemberRequest } from "../types/member.js";
+import type { UserRole } from "../types/user.js";
 import { getInviteUrl } from "../utils/invite-token.js";
+import { sendMemberInvite } from "../services/email.service.js";
+import { normalizeStringList } from "../utils/access.js";
 
 export const membersRouter = Router();
 
 membersRouter.use(authMiddleware);
+membersRouter.use(requireMemberManager);
+
+function isUserRole(value: unknown): value is UserRole {
+  return value === "admin" || value === "member" || value === "employee";
+}
+
+function validateEmployeeAccess(body: {
+  appRole?: UserRole;
+  allowedPlatforms?: string[] | null;
+  allowedCategories?: string[] | null;
+}): string | null {
+  if (body.appRole !== "employee") return null;
+  const platforms = normalizeStringList(body.allowedPlatforms ?? []);
+  const categories = normalizeStringList(body.allowedCategories ?? []);
+  if (platforms.length === 0) {
+    return "Select at least one platform for employees";
+  }
+  if (categories.length === 0) {
+    return "Select at least one category for employees";
+  }
+  return null;
+}
 
 membersRouter.get("/", async (_req, res) => {
   try {
@@ -47,6 +72,17 @@ membersRouter.post("/", async (req: AuthenticatedRequest, res) => {
       return;
     }
 
+    if (body.appRole !== undefined && !isUserRole(body.appRole)) {
+      res.status(400).json({ error: "Invalid access role" });
+      return;
+    }
+
+    const accessError = validateEmployeeAccess(body);
+    if (accessError) {
+      res.status(400).json({ error: accessError });
+      return;
+    }
+
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const normalizedEmail = body.email.toLowerCase().trim();
     if (!emailRegex.test(normalizedEmail)) {
@@ -66,7 +102,14 @@ membersRouter.post("/", async (req: AuthenticatedRequest, res) => {
       return;
     }
 
-    const { member, inviteToken } = await createMemberWithInvite(body, req.user!.id);
+    const { member, inviteToken } = await createMemberWithInvite(
+      {
+        ...body,
+        allowedPlatforms: normalizeStringList(body.allowedPlatforms ?? []),
+        allowedCategories: normalizeStringList(body.allowedCategories ?? []),
+      },
+      req.user!.id,
+    );
     const inviteUrl = getInviteUrl(inviteToken);
 
     await sendMemberInvite({
@@ -107,6 +150,17 @@ membersRouter.put("/:id", async (req: AuthenticatedRequest, res) => {
       return;
     }
 
+    if (body.appRole !== undefined && !isUserRole(body.appRole)) {
+      res.status(400).json({ error: "Invalid access role" });
+      return;
+    }
+
+    const accessError = validateEmployeeAccess(body);
+    if (accessError) {
+      res.status(400).json({ error: accessError });
+      return;
+    }
+
     if (body.email !== undefined) {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       const normalizedEmail = body.email.toLowerCase().trim();
@@ -123,7 +177,13 @@ membersRouter.put("/:id", async (req: AuthenticatedRequest, res) => {
       }
     }
 
-    const updated = await updateMember(memberId, body);
+    const updated = await updateMember(memberId, {
+      ...body,
+      allowedPlatforms:
+        body.allowedPlatforms === undefined ? undefined : normalizeStringList(body.allowedPlatforms ?? []),
+      allowedCategories:
+        body.allowedCategories === undefined ? undefined : normalizeStringList(body.allowedCategories ?? []),
+    });
     if (!updated) {
       res.status(404).json({ error: "Member not found" });
       return;

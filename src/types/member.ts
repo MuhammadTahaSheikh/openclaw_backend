@@ -1,3 +1,5 @@
+import type { UserRole } from "./user.js";
+
 export type MemberInviteStatus = "pending" | "accepted";
 
 export type Member = {
@@ -7,6 +9,9 @@ export type Member = {
   phone: string | null;
   role: string | null;
   notes: string | null;
+  appRole: UserRole;
+  allowedPlatforms: string[] | null;
+  allowedCategories: string[] | null;
   createdBy: number | null;
   userId: number | null;
   inviteStatus: MemberInviteStatus;
@@ -20,6 +25,9 @@ export type CreateMemberRequest = {
   phone?: string;
   role?: string;
   notes?: string;
+  appRole?: UserRole;
+  allowedPlatforms?: string[];
+  allowedCategories?: string[];
 };
 
 export type UpdateMemberRequest = {
@@ -28,6 +36,9 @@ export type UpdateMemberRequest = {
   phone?: string | null;
   role?: string | null;
   notes?: string | null;
+  appRole?: UserRole;
+  allowedPlatforms?: string[] | null;
+  allowedCategories?: string[] | null;
 };
 
 export type InviteDetails = {
